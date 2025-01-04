@@ -16,13 +16,9 @@ This Flask web application provides users with a comprehensive travel guide for 
 ## Installation
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/your-repository.git
-   ```
+
 2. Navigate to the project directory:
-   ```bash
-   cd your-repository
-   ```
+
 3. Install required dependencies:
    ```bash
    pip install -r requirements.txt
