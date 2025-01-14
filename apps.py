@@ -1,18 +1,94 @@
 import os
 import openai
+import re
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
+from serpapi import GoogleSearch
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Get the OpenAI API key from the environment variables
+# Get API keys from environment variables
 openai.api_key = os.environ.get("OPENAI_API_KEY")
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 
 app = Flask(__name__)
 
+def extract_place_names(response):
+    """
+    Extract place names from GPT response.
+    """
+    try:
+        pattern = r"places_for_images\s*=\s*\[(.*?)\]"
+        match = re.search(pattern, response, re.DOTALL)
+        if match:
+            return [place.strip().strip('"') for place in match.group(1).split(",")]
+        return []
+    except Exception as e:
+        print(f"Error extracting place names: {e}")
+        return []
+
+def get_image(places_list):
+    """
+    Retrieve image URLs for a list of places using SerpAPI.
+    """
+    image_urls = []
+    for place in places_list:
+        params = {"q": place, "engine": "google_images", "ijn": "0", "api_key": SERPAPI_KEY}
+        try:
+            search = GoogleSearch(params)
+            results_dict = search.get_dict()
+            images_results = results_dict.get("images_results", [])
+            if images_results:
+                image_urls.append(images_results[0].get("original"))
+            else:
+                image_urls.append("No image found")
+        except Exception as e:
+            print(f"Error fetching image for {place}: {e}")
+            image_urls.append("Error fetching image")
+    return image_urls
+
+def format_markdown(response, image_urls):
+    """
+    Format the GPT response and image URLs into a structured Markdown file.
+    """
+    try:
+        markdown_output = ""
+        
+        # Split the response into sections
+        sections = response.split("\n\n")
+        for section in sections:
+            if section.startswith("**"):
+                # Format headings
+                markdown_output += f"# {section.strip('*')}\n\n"
+            elif section.startswith("-"):
+                # Format list items
+                markdown_output += f"{section}\n"
+            else:
+                # Add plain text
+                markdown_output += f"{section}\n\n"
+
+        # Add images to corresponding places
+        markdown_output += "\n## Image Links for Tourist Spots\n"
+        places = extract_place_names(response)
+        
+        for place, url in zip(places, image_urls):
+            markdown_output += f"### {place}\n"
+            if url != "No image found" and url != "Error fetching image":
+                markdown_output += f"![{place}]({url})\n\n"
+            else:
+                markdown_output += f"No image available\n\n"
+
+        return markdown_output
+    except Exception as e:
+        print(f"Error formatting markdown: {e}")
+        return "Error formatting the travel guide."
+
+
 def get_travel_info(destination, travel_type):
-    # Construct a detailed query asking for different aspects of the destination
+    """
+    Generate a detailed travel guide using GPT and add image links for tourist spots.
+    """
     base_prompt = f"""
     Please create a detailed and structured travel guide for {destination}, ensuring at least 5 tourist spots are included. For each tourist spot, provide the following details separately and comprehensively:
 
@@ -65,38 +141,37 @@ def get_travel_info(destination, travel_type):
          At the very end of the response, please provide:
         1. A Python list named `places_for_images` containing the names of the 5 recommended tourist spots, like this:
            places_for_images = ["Place 1", "Place 2", "Place 3", "Place 4", "Place 5"]
-        2. A Python list named `restaurents_to_search` containing the names of 4 recommended restaurants, like this:
-           restaurents_to_search = ["Restaurant 1", "Restaurant 2", "Restaurant 3", "Restaurant 4"]
-        
-
-        Ensure the guide is organized with clear headings and subheadings for each tourist spot and restaurant, making it easy for travelers to follow.
     """
-    
-    # Travel-type-specific details
+
     type_prompts = {
-        "family": "Focus on family-friendly attractions, activities for kids , and dining options with child-friendly menus.",
+        "family": "Focus on family-friendly attractions, activities for kids, and dining options with child-friendly menus.",
         "business": "Focus on business hotels, meeting-friendly restaurants, and quick-break attractions.",
         "couple": "Focus on romantic spots, scenic locations, and intimate dining experiences.",
         "friends": "Focus on group activities, adventurous attractions, and budget-friendly options.",
         "bachelor": "Focus on nightlife, bars, and exciting activities suitable for solo travelers or small groups."
     }
 
-    # Append specific details based on travel type
-    travel_type_prompt = type_prompts.get(travel_type.lower(), "Focus on general attractions and experiences.")
-    full_prompt = base_prompt + "\n" + travel_type_prompt
+    # Include specific travel type prompt if needed
+    if travel_type in type_prompts:
+        base_prompt += "\n" + type_prompts[travel_type]
 
-    # Generate the response using OpenAI API
     try:
+        # Generate response from OpenAI
         chat_completion = openai.ChatCompletion.create(
-            messages=[{"role": "user", "content": full_prompt}],
-            model="chatgpt-4o-latest"
+            messages=[{"role": "user", "content": base_prompt}],
+            model="gpt-4"
         )
-
         response = chat_completion['choices'][0]['message']['content']
-        print(type(response))
-        return response
+
+        # Extract places for images
+        places_list = extract_place_names(response)
+        image_urls = get_image(places_list)
+
+        # Format the response into Markdown
+        markdown_response = format_markdown(response, image_urls)
+        return markdown_response
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error generating travel guide: {str(e)}"
 
 @app.route('/')
 def home():
@@ -108,17 +183,19 @@ def home():
 
 @app.route('/travel_guide')
 def travel_guide():
-    # Get the 'destination' and 'travel_type' parameters from the URL
+    """
+    Handle travel guide API requests.
+    """
     destination = request.args.get('destination')
-    travel_type = request.args.get('travel_type', 'general')  # Default to 'general' if not provided
+    travel_type = request.args.get('travel_type', 'general')
 
     if not destination:
         return "Please provide a destination in the query parameter (e.g., ?destination=New York)."
 
-    # Fetch the travel information for the destination and travel type
+    # Fetch travel information
     travel_info = get_travel_info(destination, travel_type)
 
-    # Return the travel guide info as a response on the web page
+    # Return the response as Markdown
     return f"<h1>Travel Guide for {destination} ({travel_type.capitalize()} Trip)</h1><pre>{travel_info}</pre>"
 
 if __name__ == '__main__':
