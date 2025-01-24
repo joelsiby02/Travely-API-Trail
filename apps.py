@@ -4,6 +4,8 @@ import re
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from serpapi import GoogleSearch
+import geocoder
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
@@ -11,6 +13,7 @@ load_dotenv()
 # Get API keys from environment variables
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")  # Add your Google Maps API key here
 
 app = Flask(__name__)
 
@@ -48,7 +51,7 @@ def get_image(places_list):
             image_urls.append("Error fetching image")
     return image_urls
 
-def format_markdown(response, image_urls):
+def format_markdown(response, image_urls, route_info=None):
     """
     Format the GPT response and image URLs into a structured Markdown file.
     """
@@ -78,14 +81,43 @@ def format_markdown(response, image_urls):
                 markdown_output += f"![{place}]({url})\n\n"
             else:
                 markdown_output += f"No image available\n\n"
+        
+        if route_info:
+            markdown_output += f"\n## Travel Route Information\n{route_info}"
 
         return markdown_output
     except Exception as e:
         print(f"Error formatting markdown: {e}")
         return "Error formatting the travel guide."
 
+def get_route(origin, destination):
+    """
+    Get the route information and travel time using Google Maps Directions API.
+    """
+    directions_url = f"https://maps.googleapis.com/maps/api/directions/json"
+    params = {
+        "origin": origin, 
+        "destination": destination, 
+        "key": GOOGLE_MAPS_API_KEY
+    }
+    response = requests.get(directions_url, params=params)
+    data = response.json()
 
-def get_travel_info(destination, travel_type):
+    if data['status'] == 'OK':
+        route = data['routes'][0]['legs'][0]
+        travel_time = route['duration']['text']
+        travel_distance = route['distance']['text']
+        steps = route['steps']
+        route_info = f"Travel Time: {travel_time}\nDistance: {travel_distance}\n\nStep-by-step Directions:\n"
+        for step in steps:
+            route_info += f"{step['html_instructions']}\n"
+        maps_link = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}"
+        route_info += f"\nGoogle Maps Link: {maps_link}"
+        return route_info
+    else:
+        return "Error: Unable to fetch directions."
+
+def get_travel_info(destination, travel_type, current_location):
     """
     Generate a detailed travel guide using GPT and add image links for tourist spots.
     """
@@ -139,7 +171,7 @@ def get_travel_info(destination, travel_type):
         - Hidden gems or underrated attractions worth exploring.
 
          At the very end of the response, please provide:
-        1. A Python list named `places_for_images` containing the names of the 5 recommended tourist spots, like this:
+        1. A Python list named places_for_images containing the names of the 5 recommended tourist spots, like this:
            places_for_images = ["Place 1", "Place 2", "Place 3", "Place 4", "Place 5"]
     """
 
@@ -151,7 +183,6 @@ def get_travel_info(destination, travel_type):
         "bachelor": "Focus on nightlife, bars, and exciting activities suitable for solo travelers or small groups."
     }
 
-    # Include specific travel type prompt if needed
     if travel_type in type_prompts:
         base_prompt += "\n" + type_prompts[travel_type]
 
@@ -159,7 +190,7 @@ def get_travel_info(destination, travel_type):
         # Generate response from OpenAI
         chat_completion = openai.ChatCompletion.create(
             messages=[{"role": "user", "content": base_prompt}],
-            model="gpt-4"
+            model="gpt-3.5-turbo"
         )
         response = chat_completion['choices'][0]['message']['content']
 
@@ -167,8 +198,11 @@ def get_travel_info(destination, travel_type):
         places_list = extract_place_names(response)
         image_urls = get_image(places_list)
 
+        # Get route information
+        route_info = get_route(current_location, destination)
+
         # Format the response into Markdown
-        markdown_response = format_markdown(response, image_urls)
+        markdown_response = format_markdown(response, image_urls, route_info)
         return markdown_response
     except Exception as e:
         return f"Error generating travel guide: {str(e)}"
@@ -192,11 +226,15 @@ def travel_guide():
     if not destination:
         return "Please provide a destination in the query parameter (e.g., ?destination=New York)."
 
+    # Get current location (IP-based)
+    g = geocoder.ip('me')
+    current_location = f"{g.latlng[0]},{g.latlng[1]}"  # latitude,longitude format
+
     # Fetch travel information
-    travel_info = get_travel_info(destination, travel_type)
+    travel_info = get_travel_info(destination, travel_type, current_location)
 
     # Return the response as Markdown
     return f"<h1>Travel Guide for {destination} ({travel_type.capitalize()} Trip)</h1><pre>{travel_info}</pre>"
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
