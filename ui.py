@@ -37,7 +37,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # App header
-st.markdown('<p class="header-text">✈️ Smart Travel Planner</p>', unsafe_allow_html=True)
+st.markdown('<p class="header-text"> Travelyy – Explore More, Plan Less </p>', unsafe_allow_html=True)
 
 # Input section
 col1, col2 = st.columns([3, 2])
