@@ -9,3 +9,4 @@ markdown-it-py
 pygments
 rich
 google-search-results
+googlesearch-python
