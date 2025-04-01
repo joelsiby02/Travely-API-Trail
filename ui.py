@@ -2,6 +2,7 @@ import streamlit as st
 import re
 import pandas as pd
 from vait import get_travel_info
+from serpapi import GoogleSearch
 
 # Set page configuration
 st.set_page_config(
