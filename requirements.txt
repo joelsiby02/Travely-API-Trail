@@ -3,7 +3,6 @@ openai==0.28
 pandas
 requests
 python-dotenv
-serpapi
 flask
 markdown-it-py
 pygments
